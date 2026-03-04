@@ -151,17 +151,49 @@ impl PtyManager {
 
 fn detect_shell() -> String {
     if cfg!(target_os = "windows") {
-        // Prefer PowerShell, fall back to cmd
+        // 1. Git Bash (most compatible — no ExecutionPolicy issues)
+        let git_bash_paths = [
+            "C:\\Program Files\\Git\\bin\\bash.exe",
+            "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+        ];
+        for path in &git_bash_paths {
+            if std::path::Path::new(path).exists() {
+                tracing::info!(shell = %path, "Using Git Bash");
+                return path.to_string();
+            }
+        }
+
+        // 2. MSYS2 bash
+        let msys2_paths = [
+            "C:\\msys64\\usr\\bin\\bash.exe",
+            "C:\\msys2\\usr\\bin\\bash.exe",
+        ];
+        for path in &msys2_paths {
+            if std::path::Path::new(path).exists() {
+                tracing::info!(shell = %path, "Using MSYS2 bash");
+                return path.to_string();
+            }
+        }
+
+        // 3. PowerShell — only if ExecutionPolicy allows scripts
         if let Ok(ps) = std::process::Command::new("powershell")
             .arg("-NoProfile")
             .arg("-Command")
-            .arg("echo ok")
+            .arg("Get-ExecutionPolicy")
             .output()
         {
             if ps.status.success() {
-                return "powershell".to_string();
+                let policy = String::from_utf8_lossy(&ps.stdout).trim().to_lowercase();
+                if policy != "restricted" {
+                    tracing::info!(policy = %policy, "Using PowerShell");
+                    return "powershell".to_string();
+                }
+                tracing::warn!(policy = %policy, "PowerShell ExecutionPolicy is Restricted, falling back to cmd");
             }
         }
+
+        // 4. cmd.exe (always works)
+        tracing::info!("Using cmd.exe");
         "cmd".to_string()
     } else {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
