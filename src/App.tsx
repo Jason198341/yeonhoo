@@ -9,7 +9,6 @@ import type { PaneTree } from "@/types/workspace";
 import TabBar from "@/components/tab/TabBar";
 import PaneContainer from "@/components/pane/PaneContainer";
 import StatusBar from "@/components/statusbar/StatusBar";
-import SlashAutocomplete from "@/components/overlay/SlashAutocomplete";
 import HistorySearch from "@/components/overlay/HistorySearch";
 import CommandPalette from "@/components/overlay/CommandPalette";
 import "./App.css";
@@ -115,7 +114,6 @@ function App() {
         )}
       </div>
       <StatusBar />
-      <SlashAutocomplete />
       <HistorySearch />
       <CommandPalette />
     </div>

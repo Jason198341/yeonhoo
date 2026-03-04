@@ -13,12 +13,11 @@ import {
 } from "@/ipc/terminal";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useClaudeStore, analyzeOutput } from "@/stores/claude";
-import { useAutocompleteStore } from "@/stores/autocomplete";
 import { useHistoryStore } from "@/stores/history";
 import { useConfigStore } from "@/stores/config";
 import { notifyPermissionPrompt } from "@/lib/notifications";
 import { formatPaths, convertPastedPaths } from "@/lib/smartPaste";
-import { historyAdd } from "@/ipc/history";
+import { historyAdd, historySearch } from "@/ipc/history";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { PaneId } from "@/types/workspace";
 import "@xterm/xterm/css/xterm.css";
@@ -34,7 +33,12 @@ export default function TerminalPane({ paneId, focused }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const inputBufferRef = useRef("");  // Track current line input for / detection
+  const inputBufferRef = useRef("");
+  const historyNavRef = useRef<{ entries: string[]; index: number; savedInput: string }>({
+    entries: [],
+    index: -1,
+    savedInput: "",
+  });
   const setActivePane = useWorkspaceStore((s) => s.setActivePane);
   const setClaudeMode = useClaudeStore((s) => s.setClaudeMode);
   const updateMetrics = useClaudeStore((s) => s.updateMetrics);
@@ -83,44 +87,6 @@ export default function TerminalPane({ paneId, focused }: TerminalPaneProps) {
 
     // Intercept Ctrl+V and autocomplete navigation at DOM capture phase
     const handleKeyDown = (e: KeyboardEvent) => {
-      const ac = useAutocompleteStore.getState();
-
-      // Autocomplete navigation when visible
-      if (ac.visible && ac.paneId === paneId) {
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          ac.moveUp();
-          return;
-        }
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          ac.moveDown();
-          return;
-        }
-        if (e.key === "Enter" || e.key === "Tab") {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          const selected = ac.getSelected();
-          if (selected) {
-            // Erase the typed "/" + query, then insert the full command
-            const eraseLen = 1 + ac.query.length; // "/" + query chars
-            const backspaces = "\x7f".repeat(eraseLen);
-            terminalInput(paneId, backspaces + selected.name + " ").catch(console.error);
-            ac.recordUsage(selected.name);
-          }
-          ac.close();
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          ac.close();
-          return;
-        }
-      }
-
       // Ctrl+R → history search
       if (e.key === "r" && e.ctrlKey && !e.shiftKey) {
         e.preventDefault();
@@ -154,7 +120,10 @@ export default function TerminalPane({ paneId, focused }: TerminalPaneProps) {
           e.stopImmediatePropagation();
           const selected = hs.getSelected();
           if (selected) {
-            terminalInput(paneId, selected.command).catch(console.error);
+            // Clear current input line, then paste the selected command
+            const eraseSeq = "\x15"; // Ctrl+U — kill line (works in bash/cmd)
+            terminalInput(paneId, eraseSeq + selected.command).catch(console.error);
+            inputBufferRef.current = selected.command;
           }
           hs.close();
           return;
@@ -165,6 +134,42 @@ export default function TerminalPane({ paneId, focused }: TerminalPaneProps) {
           hs.close();
           return;
         }
+      }
+
+      // Arrow Up/Down → inline history navigation (when history search is NOT open)
+      if (e.key === "ArrowUp" && !e.ctrlKey && !e.shiftKey) {
+        const nav = historyNavRef.current;
+        if (nav.entries.length === 0) return; // let shell handle it if no history loaded
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (nav.index === -1) {
+          nav.savedInput = inputBufferRef.current;
+        }
+        if (nav.index < nav.entries.length - 1) {
+          nav.index++;
+          const cmd = nav.entries[nav.index];
+          const eraseSeq = "\x15"; // Ctrl+U kill line
+          terminalInput(paneId, eraseSeq + cmd).catch(console.error);
+          inputBufferRef.current = cmd;
+        }
+        return;
+      }
+      if (e.key === "ArrowDown" && !e.ctrlKey && !e.shiftKey) {
+        const nav = historyNavRef.current;
+        if (nav.index === -1) return; // already at bottom, let shell handle
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        nav.index--;
+        const eraseSeq = "\x15";
+        if (nav.index === -1) {
+          terminalInput(paneId, eraseSeq + nav.savedInput).catch(console.error);
+          inputBufferRef.current = nav.savedInput;
+        } else {
+          const cmd = nav.entries[nav.index];
+          terminalInput(paneId, eraseSeq + cmd).catch(console.error);
+          inputBufferRef.current = cmd;
+        }
+        return;
       }
 
       // Ctrl+Shift+C or Ctrl+C with selection → copy to clipboard
@@ -221,26 +226,34 @@ export default function TerminalPane({ paneId, focused }: TerminalPaneProps) {
     };
     el.addEventListener("paste", blockPaste, true);
 
-    // Keyboard → PTY + autocomplete input tracking
+    // Load history entries for arrow-up navigation
+    historySearch("", 200)
+      .then((entries) => {
+        historyNavRef.current.entries = entries.map((e) => e.command);
+      })
+      .catch(console.error);
+
+    // Keyboard → PTY + input tracking
     const dataDisposable = term.onData((data) => {
       terminalInput(paneId, data).catch(console.error);
 
-      const ac = useAutocompleteStore.getState();
-
-      // Enter → record command in history, then reset buffer
+      // Enter → record command in history, reset buffer & nav index
       if (data === "\r") {
         const cmd = inputBufferRef.current.trim();
         if (cmd) {
           historyAdd(cmd, "", paneId).catch(console.error);
+          // Prepend to nav history so it's immediately available
+          historyNavRef.current.entries.unshift(cmd);
         }
         inputBufferRef.current = "";
-        if (ac.visible) ac.close();
+        historyNavRef.current.index = -1;
+        historyNavRef.current.savedInput = "";
         return;
       }
       // Ctrl+C resets buffer
       if (data === "\x03") {
         inputBufferRef.current = "";
-        if (ac.visible) ac.close();
+        historyNavRef.current.index = -1;
         return;
       }
 
@@ -249,20 +262,6 @@ export default function TerminalPane({ paneId, focused }: TerminalPaneProps) {
         inputBufferRef.current = inputBufferRef.current.slice(0, -1);
       } else if (data.length === 1 && data >= " ") {
         inputBufferRef.current += data;
-      } else {
-        // Non-printable (arrows, etc) — don't modify buffer
-        return;
-      }
-
-      const buf = inputBufferRef.current;
-
-      // Detect "/" at start of input
-      if (buf === "/") {
-        ac.open(paneId);
-      } else if (buf.startsWith("/") && ac.visible) {
-        ac.setQuery(buf.slice(1));
-      } else if (!buf.startsWith("/") && ac.visible) {
-        ac.close();
       }
     });
 
