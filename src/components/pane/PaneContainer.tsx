@@ -11,10 +11,12 @@ interface PaneContainerProps {
 export default function PaneContainer({ tree, activePaneId }: PaneContainerProps) {
   if (tree.type === "leaf") {
     return (
-      <TerminalPane
-        paneId={tree.paneId}
-        focused={tree.paneId === activePaneId}
-      />
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+        <TerminalPane
+          paneId={tree.paneId}
+          focused={tree.paneId === activePaneId}
+        />
+      </div>
     );
   }
 

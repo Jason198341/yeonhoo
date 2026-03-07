@@ -290,10 +290,15 @@ export default function TerminalPane({ paneId, focused }: TerminalPaneProps) {
       }
     });
 
-    // Resize observer
+    // Resize observer — debounced to prevent rapid-fire fit calls during
+    // heavy output (Claude Code) or split-pane drag, which corrupt viewport dims
+    let fitTimer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(() => {
-      fitAddon.fit();
-      resizePane(paneId, term.cols, term.rows).catch(console.error);
+      if (fitTimer) clearTimeout(fitTimer);
+      fitTimer = setTimeout(() => {
+        fitAddon.fit();
+        resizePane(paneId, term.cols, term.rows).catch(console.error);
+      }, 50);
     });
     ro.observe(el);
 
@@ -319,6 +324,7 @@ export default function TerminalPane({ paneId, focused }: TerminalPaneProps) {
 
     return () => {
       cancelAnimationFrame(initFrame);
+      if (fitTimer) clearTimeout(fitTimer);
       clearInterval(claudeInterval);
       ro.disconnect();
       dataDisposable.dispose();
@@ -345,7 +351,7 @@ export default function TerminalPane({ paneId, focused }: TerminalPaneProps) {
       data-focused={focused}
       data-claude={isClaudeMode}
       onMouseDown={() => setActivePane(paneId)}
-      style={{ width: "100%", height: "100%", overflow: "hidden" }}
+      style={{ position: "absolute", inset: 0, overflow: "hidden" }}
     />
   );
 }
