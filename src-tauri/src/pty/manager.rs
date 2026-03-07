@@ -53,6 +53,8 @@ impl PtyManager {
         if let Some(dir) = cwd {
             cmd.cwd(dir);
         }
+        // Prevent Claude Code nested-session error — child shell must not inherit this
+        cmd.env_remove("CLAUDECODE");
 
         let child = pair
             .slave
