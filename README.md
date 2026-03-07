@@ -4,6 +4,23 @@ Claude Code optimized next-generation terminal emulator.
 
 Built with **Tauri 2 + Rust + React + xterm.js**.
 
+![Yeonhoo Terminal](screenshot.png)
+
+## Installation
+
+### Windows (권장)
+
+1. [Releases](https://github.com/Jason198341/yeonhoo/releases/latest) 페이지에서 **`yeonhoo_0.1.0_x64-setup.exe`** 다운로드
+2. 설치 파일 실행 → 설치 완료
+3. 시작 메뉴 또는 바탕화면에서 **Yeonhoo** 실행
+
+> MSI 설치 파일(`yeonhoo_0.1.0_x64_en-US.msi`)도 제공됩니다. 엔터프라이즈 환경이나 Group Policy 배포 시 사용하세요.
+
+### 시스템 요구사항
+
+- Windows 10 / 11 (x64)
+- WebView2 런타임 (Windows 11은 기본 내장, Windows 10은 설치 시 자동 설치)
+
 ## Features
 
 - **Smart Paste** — Clipboard integration via Win32 API (CF_HDROP file paths, CF_UNICODETEXT). Auto-converts Windows paths to Unix for MSYS2/WSL.
@@ -45,7 +62,7 @@ Built with **Tauri 2 + Rust + React + xterm.js**.
 | Terminal | xterm.js 6 + WebGL addon |
 | Build | Vite 7, Bun |
 
-## Development
+## Build from Source
 
 ```bash
 # Install dependencies
