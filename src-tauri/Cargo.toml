@@ -35,4 +35,5 @@ toml = "0.8"
 dirs = "6"
 notify = { version = "8", features = ["macos_kqueue"] }
 rusqlite = { version = "0.35", features = ["bundled"] }
+axum = "0.7"
 

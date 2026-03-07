@@ -1,3 +1,4 @@
+mod api;
 mod claude;
 mod config;
 mod history;
@@ -20,9 +21,18 @@ pub fn run() {
     let config_manager = Arc::new(ConfigManager::new());
     let history_db = Arc::new(HistoryDb::new());
 
+    // Clone before builder so both setup closure and manage() can use it
+    let pty_for_api = Arc::clone(&pty_manager);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(move |_app| {
+            tauri::async_runtime::spawn(async move {
+                api::serve(pty_for_api).await;
+            });
+            Ok(())
+        })
         .manage(pty_manager)
         .manage(config_manager)
         .manage(history_db)

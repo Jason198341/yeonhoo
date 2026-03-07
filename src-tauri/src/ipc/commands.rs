@@ -34,9 +34,10 @@ pub fn create_pane(
     let reader = pty_manager.take_reader(&pane_id)?;
     let pane_id_clone = pane_id.clone();
     let app_clone = app.clone();
+    let pty_clone = Arc::clone(&pty_manager);
 
     std::thread::spawn(move || {
-        read_pty_output(reader, &pane_id_clone, &app_clone);
+        read_pty_output(reader, &pane_id_clone, &app_clone, pty_clone);
     });
 
     tracing::info!(pane_id = %pane_id, "Pane created");
@@ -187,7 +188,12 @@ pub fn session_clear() -> Result<(), String> {
     crate::session::clear()
 }
 
-fn read_pty_output(mut reader: Box<dyn Read + Send>, pane_id: &str, app: &AppHandle) {
+fn read_pty_output(
+    mut reader: Box<dyn Read + Send>,
+    pane_id: &str,
+    app: &AppHandle,
+    pty_manager: Arc<PtyManager>,
+) {
     let mut buf = [0u8; 4096];
     loop {
         match reader.read(&mut buf) {
@@ -205,6 +211,8 @@ fn read_pty_output(mut reader: Box<dyn Read + Send>, pane_id: &str, app: &AppHan
             Ok(n) => {
                 // Convert to string (lossy for non-utf8)
                 let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                // Write to MCP output buffer
+                pty_manager.push_output(pane_id, &text);
                 let _ = app.emit(
                     "terminal-output",
                     TerminalOutput {

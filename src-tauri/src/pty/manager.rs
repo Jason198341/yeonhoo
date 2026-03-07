@@ -18,13 +18,38 @@ pub struct PtyInstance {
 
 pub struct PtyManager {
     instances: Arc<Mutex<HashMap<PaneId, PtyInstance>>>,
+    output_buffers: Arc<Mutex<HashMap<PaneId, String>>>,
 }
 
 impl PtyManager {
     pub fn new() -> Self {
         Self {
             instances: Arc::new(Mutex::new(HashMap::new())),
+            output_buffers: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Append PTY output to the API buffer (called from read thread)
+    pub fn push_output(&self, pane_id: &str, data: &str) {
+        let mut bufs = self.output_buffers.lock();
+        let buf = bufs.entry(pane_id.to_string()).or_insert_with(String::new);
+        // Cap buffer at 1MB; if exceeded, keep last 512KB
+        if buf.len() + data.len() > 1_048_576 {
+            let keep = buf.len().saturating_sub(524_288);
+            *buf = buf[keep..].to_string();
+        }
+        buf.push_str(data);
+    }
+
+    /// Drain and return all buffered output for a pane (clears buffer)
+    pub fn drain_output(&self, pane_id: &str) -> String {
+        let mut bufs = self.output_buffers.lock();
+        std::mem::take(bufs.entry(pane_id.to_string()).or_insert_with(String::new))
+    }
+
+    /// List all active pane IDs
+    pub fn get_pane_ids(&self) -> Vec<PaneId> {
+        self.instances.lock().keys().cloned().collect()
     }
 
     pub fn spawn(
@@ -123,6 +148,7 @@ impl PtyManager {
         if let Some(mut instance) = instances.remove(pane_id) {
             let _ = instance.child.kill();
         }
+        self.output_buffers.lock().remove(pane_id);
         Ok(())
     }
 
